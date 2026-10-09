@@ -313,6 +313,10 @@ retryLoop:
 		"cachedTokens", pCachedTokens,
 		"hasCachedTokens", hasPCachedTokens)
 
+	if s.config.NIXLPushMode {
+		s.storeNIXLPushIdentity(prefillPodHostPort, pKVTransferParams)
+	}
+
 	// Decode Stage
 
 	ctx, decodeSpan := tracer.Start(ctx, "decode",

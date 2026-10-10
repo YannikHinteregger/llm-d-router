@@ -132,6 +132,13 @@ func (c *nixlPushIdentityCache) put(hostPort string, identity nixlPushIdentity) 
 	c.lru.Add(hostPort, identity)
 }
 
+// remove removes the entry for hostPort. It reports whether there was one.
+func (c *nixlPushIdentityCache) remove(hostPort string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.lru.Remove(hostPort)
+}
+
 // dropIfMatches removes the entry for hostPort only while it holds identity,
 // so a failure seen with an older identity cannot remove a newer one. It
 // reports whether it removed the entry.
@@ -154,17 +161,26 @@ func newNIXLPushIdentityCache(size int) (*nixlPushIdentityCache, error) {
 }
 
 // storeNIXLPushIdentity caches the NIXL push identity in a prefill answer's
-// kv_transfer_params under the endpoint that answered. An answer without one
-// leaves the cache unchanged.
-func (s *Server) storeNIXLPushIdentity(prefillPodHostPort string, kvTransferParams any) {
+// kv_transfer_params under the endpoint that answered and returns it. An
+// answer without one removes the endpoint's entry.
+func (s *Server) storeNIXLPushIdentity(prefillPodHostPort string, kvTransferParams any) (nixlPushIdentity, bool) {
 	identity, ok := extractNIXLPushIdentity(kvTransferParams)
 	if !ok {
+		s.nixlPushIdentities.remove(prefillPodHostPort)
 		s.logMissingNIXLPushIdentity(prefillPodHostPort, kvTransferParams)
-		return
+		return nixlPushIdentity{}, false
 	}
 	s.nixlPushIdentities.put(prefillPodHostPort, identity)
 	s.logger.V(logging.TRACE).Info("stored NIXL push identity", "target", prefillPodHostPort,
 		"engine_id", identity.engineID, "remote_host", identity.host, "remote_port", identity.port)
+	return identity, true
+}
+
+// nixlPushIdentityMatches refreshes the cached identity from the prefill
+// response and reports whether the prefill ran on the engine decode was sent to.
+func (s *Server) nixlPushIdentityMatches(prefillPodHostPort string, sent nixlPushIdentity, prefillerResponse map[string]any) bool {
+	answered, ok := s.storeNIXLPushIdentity(prefillPodHostPort, prefillerResponse[reqcommon.FieldKVTransferParams])
+	return ok && answered == sent
 }
 
 // logMissingNIXLPushIdentity logs a prefill answer without a NIXL push
